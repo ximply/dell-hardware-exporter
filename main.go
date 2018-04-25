@@ -13,7 +13,6 @@ import (
 	"github.com/ximply/dell-hardware-exporter/cache"
 	"strings"
 	"time"
-	"strconv"
 )
 
 var (
@@ -32,7 +31,7 @@ func readFile(file string) (string, error) {
 
 func dellHardwareSummary() string {
 	tmp := "/dev/shm/dellhwsumm.tmp"
-	cmdStr := fmt.Sprintf("`omreport chassis | grep -v Health | grep -v Chassis | grep -v SEVERITY | grep -v For | grep -v \"Hardware Log\" | grep -v Voltages | grep -v Batteries | grep -v Intrusion | sed /^$/d > %s`", tmp)
+	cmdStr := fmt.Sprintf("`omreport chassis | grep -v Health | grep -v Chassis | grep -v SEVERITY | grep -v For | grep -v Hardware | grep -v Voltages | grep -v Batteries | grep -v Intrusion | sed /^$/d > %s`", tmp)
 	cmd := exec.Command("/bin/sh", "-c", cmdStr)
 	cmd.Start()
 	cmd.Run()
@@ -43,8 +42,8 @@ func dellHardwareSummary() string {
 }
 
 func dellHardwareStoragePDisk() string {
-    tmp := "/dev/shm/dellhwspd.tmp"
-	cmdStr := fmt.Sprintf("awk -v hardware_physics_disk_number=`omreport storage pdisk controller=0 | grep -c \"^ID\"` -v hardware_physics_disk=`omreport storage pdisk controller=0 | awk '/^Status/{if($NF==\"Ok\") count+=1}END{print count}'` 'BEGIN{if(hardware_physics_disk_number==hardware_physics_disk) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
+	tmp := "/dev/shm/dellhwspd.tmp"
+	cmdStr := fmt.Sprintf("awk -v hardware_physics_disk_number=`omreport storage pdisk controller=0 | grep -c ^ID` -v hardware_physics_disk=`omreport storage pdisk controller=0 | awk '/^Status/{if(length($NF)==2) count+=1}END{print count}'` 'BEGIN{if(hardware_physics_disk_number==hardware_physics_disk) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
 	cmd := exec.Command("/bin/sh", "-c", cmdStr)
 	cmd.Start()
 	cmd.Run()
@@ -56,7 +55,7 @@ func dellHardwareStoragePDisk() string {
 
 func dellHardwareStorageVDisk() string {
 	tmp := "/dev/shm/dellhwsvd.tmp"
-	cmdStr := fmt.Sprintf("awk -v hardware_virtual_disk_number=`omreport storage vdisk controller=0 | grep -c \"^ID\"` -v hardware_virtual_disk=`omreport storage vdisk controller=0 | awk '/^Status/{if($NF==\"Ok\") count+=1}END{print count}'` 'BEGIN{if(hardware_virtual_disk_number==hardware_virtual_disk) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
+	cmdStr := fmt.Sprintf("awk -v hardware_virtual_disk_number=`omreport storage vdisk controller=0 | grep -c ^ID` -v hardware_virtual_disk=`omreport storage vdisk controller=0 | awk '/^Status/{if(length($NF)==2) count+=1}END{print count}'` 'BEGIN{if(hardware_virtual_disk_number==hardware_virtual_disk) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
 	cmd := exec.Command("/bin/sh", "-c", cmdStr)
 	cmd.Start()
 	cmd.Run()
@@ -68,7 +67,7 @@ func dellHardwareStorageVDisk() string {
 
 func dellHardwareNic() string {
 	tmp := "/dev/shm/dellhwnic.tmp"
-	cmdStr := fmt.Sprintf("awk -v hardware_nic_number=`omreport chassis nics | grep -c \"Interface Name\"` -v hardware_nic=`omreport chassis nics | awk '/^Connection Status/{print $NF}'| wc -l` 'BEGIN{if(hardware_nic_number==hardware_nic) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
+	cmdStr := fmt.Sprintf("awk -v hardware_nic_number=`omreport chassis nics | grep -v Network | grep -v Physical | grep -v Team | grep -v xenbr |grep -v ovs-system | grep -c Interface` -v hardware_nic=`omreport chassis nics | awk '/^Connection Status/{print $NF}'| wc -l` 'BEGIN{if(hardware_nic_number==hardware_nic) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
 	cmd := exec.Command("/bin/sh", "-c", cmdStr)
 	cmd.Start()
 	cmd.Run()
@@ -85,44 +84,54 @@ func checkHealth() {
 	//Ok       : Power Management
 	//Ok       : Processors
 	//Ok       : Temperatures
-    summary := dellHardwareSummary()
-    summary = strings.TrimRight(summary, "\n")
+	summary := dellHardwareSummary()
+	summary = strings.TrimRight(summary, "\n")
 	summaryList := strings.Split(summary, "\n")
-    for _, i := range summaryList {
-    	tmp := strings.Split(i, ":")
-    	if len(tmp) == 2 {
-    		// status: OK or Critical
-    		s1 := tmp[0]
-    		s1 = strings.TrimSpace(s1)
-    		// content
-    		s2 := tmp[1]
-    		s2 = strings.TrimLeft(s2, " ")
-    		s2 = strings.Replace(s2, " ", "_", 0)
-    		s2 = strings.ToLower(s2)
-    		if strings.HasPrefix(s1, "OK") {
-    			cache.GetInstance().Add(s2, 10 * time.Minute, 1)
-			} else {
+	for _, i := range summaryList {
+		tmp := strings.Split(i, ":")
+		if len(tmp) == 2 {
+			// status: OK or Critical
+			s1 := tmp[0]
+			s1 = strings.TrimSpace(s1)
+			// content
+			s2 := tmp[1]
+			if strings.Contains(s2, "Supplies") {
+				s2 = "powersupplies"
+			} else if strings.Contains(s2, "Management") {
+				s2 = "powermanagement"
+			} else if strings.Contains(s2, "Fans") {
+				s2 = "fans"
+			} else if strings.Contains(s2, "Memory") {
+				s2 = "memory"
+			} else if strings.Contains(s2, "Processors") {
+				s2 = "processors"
+			} else if strings.Contains(s2, "Temperatures") {
+				s2 = "temperatures"
+			}
+			if strings.Contains(s1, "Critical") {
 				cache.GetInstance().Add(s2, 10 * time.Minute, 0)
+			} else {
+				cache.GetInstance().Add(s2, 10 * time.Minute, 1)
 			}
 		}
 	}
 
 	spd := dellHardwareStoragePDisk()
-	if strings.HasSuffix(spd, "1") {
+	if strings.HasPrefix(spd, "1") {
 		cache.GetInstance().Add("physics_disk", 10 * time.Minute, 1)
 	} else {
 		cache.GetInstance().Add("physics_disk", 10 * time.Minute, 0)
 	}
 
 	svd := dellHardwareStorageVDisk()
-	if strings.HasSuffix(svd, "1") {
+	if strings.HasPrefix(svd, "1") {
 		cache.GetInstance().Add("virtual_disk", 10 * time.Minute, 1)
 	} else {
 		cache.GetInstance().Add("virtual_disk", 10 * time.Minute, 0)
 	}
 
 	nic := dellHardwareNic()
-	if strings.HasSuffix(nic, "1") {
+	if strings.HasPrefix(nic, "1") {
 		cache.GetInstance().Add("nic", 10 * time.Minute, 1)
 	} else {
 		cache.GetInstance().Add("nic", 10 * time.Minute, 0)
@@ -132,61 +141,54 @@ func checkHealth() {
 
 func metrics(w http.ResponseWriter, req *http.Request) {
 	ret := ""
-    namespace := "dell_hw"
+	namespace := "dell_hw"
 
-    r, fans := cache.GetInstance().Value("fans")
-    fansV, _ := strconv.ParseFloat(fans.Text, 64)
+	r, fans := cache.GetInstance().Value("fans")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"fans\"} %g\n", namespace, fansV)
+		ret += fmt.Sprintf("%s{type=\"fans\"} %g\n", namespace, float64(fans.(int)))
 	} else {
 		ret += fmt.Sprintf("%s{type=\"fans\"} %g\n", namespace, 1)
 	}
 
 	r, memory := cache.GetInstance().Value("memory")
-	memoryV, _ := strconv.ParseFloat(memory.Text, 64)
 	if r {
-		ret += fmt.Sprintf("%s{type=\"memory\"} %g\n", namespace, memoryV)
+		ret += fmt.Sprintf("%s{type=\"memory\"} %g\n", namespace, float64(memory.(int)))
 	} else {
 		ret += fmt.Sprintf("%s{type=\"memory\"} %g\n", namespace, 1)
 	}
 
-	r, power_supplies := cache.GetInstance().Value("power_supplies")
-	power_suppliesV, _ := strconv.ParseFloat(power_supplies.Text, 64)
+	r, powersupplies := cache.GetInstance().Value("powersupplies")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"power_supplies\"} %g\n", namespace, power_suppliesV)
+		ret += fmt.Sprintf("%s{type=\"power_supplies\"} %g\n", namespace, float64(powersupplies.(int)))
 	} else {
 		ret += fmt.Sprintf("%s{type=\"power_supplies\"} %g\n", namespace, 1)
 	}
 
-	r, power_management := cache.GetInstance().Value("power_management")
-	power_managementV, _ := strconv.ParseFloat(power_management.Text, 64)
+	r, powermanagement := cache.GetInstance().Value("powermanagement")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"power_management\"} %g\n", namespace, power_managementV)
+		ret += fmt.Sprintf("%s{type=\"power_management\"} %g\n", namespace, float64(powermanagement.(int)))
 	} else {
 		ret += fmt.Sprintf("%s{type=\"power_management\"} %g\n", namespace, 1)
 	}
 
 	r, processors := cache.GetInstance().Value("processors")
-	processorsV, _ := strconv.ParseFloat(processors.Text, 64)
 	if r {
-		ret += fmt.Sprintf("%s{type=\"processors\"} %g\n", namespace, processorsV)
+		ret += fmt.Sprintf("%s{type=\"processors\"} %g\n", namespace, float64(processors.(int)))
 	} else {
 		ret += fmt.Sprintf("%s{type=\"processors\"} %g\n", namespace, 1)
 	}
 
 	r, temperatures := cache.GetInstance().Value("temperatures")
-	temperaturesV, _ := strconv.ParseFloat(temperatures.Text, 64)
 	if r {
-		ret += fmt.Sprintf("%s{type=\"temperatures\"} %g\n", namespace, temperaturesV)
+		ret += fmt.Sprintf("%s{type=\"temperatures\"} %g\n", namespace, float64(temperatures.(int)))
 	} else {
 		ret += fmt.Sprintf("%s{type=\"temperatures\"} %g\n", namespace, 1)
 	}
 
 
 	r, physics_disk := cache.GetInstance().Value("physics_disk")
-	physics_diskV, _ := strconv.ParseFloat(physics_disk.Text, 64)
 	if r {
-		ret += fmt.Sprintf("%s{type=\"physics_disk\"} %g\n", namespace, physics_diskV)
+		ret += fmt.Sprintf("%s{type=\"physics_disk\"} %g\n", namespace, float64(physics_disk.(int)))
 	} else {
 		ret += fmt.Sprintf("%s{type=\"physics_disk\"} %g\n", namespace, 1)
 	}
@@ -194,9 +196,8 @@ func metrics(w http.ResponseWriter, req *http.Request) {
 
 
 	r, virtual_disk := cache.GetInstance().Value("virtual_disk")
-	virtual_diskV, _ := strconv.ParseFloat(virtual_disk.Text, 64)
 	if r {
-		ret += fmt.Sprintf("%s{type=\"virtual_disk\"} %g\n", namespace, virtual_diskV)
+		ret += fmt.Sprintf("%s{type=\"virtual_disk\"} %g\n", namespace, float64(virtual_disk.(int)))
 	} else {
 		ret += fmt.Sprintf("%s{type=\"virtual_disk\"} %g\n", namespace, 1)
 	}
@@ -204,9 +205,8 @@ func metrics(w http.ResponseWriter, req *http.Request) {
 
 
 	r, nic := cache.GetInstance().Value("nic")
-	nicV, _ := strconv.ParseFloat(nic.Text, 64)
 	if r {
-		ret += fmt.Sprintf("%s{type=\"nic\"} %g\n", namespace, nicV)
+		ret += fmt.Sprintf("%s{type=\"nic\"} %g\n", namespace, float64(nic.(int)))
 	} else {
 		ret += fmt.Sprintf("%s{type=\"nic\"} %g\n", namespace, 1)
 	}
