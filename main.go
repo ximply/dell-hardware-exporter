@@ -13,11 +13,17 @@ import (
 	"github.com/ximply/dell-hardware-exporter/cache"
 	"strings"
 	"time"
+	"strconv"
 )
 
 var (
-	listenAddr = kingpin.Arg("unix-sock", "Exporter listen addr. Default is /dev/shm/dellhardware_exporter.sock").
-		String()
+	serverIp = kingpin.Arg("sip", "Server IP addr").Required().String()
+	processorCount = kingpin.Arg("psrcnt", "Processor count").Required().String()
+	processorCores = kingpin.Arg("psrcores", "Cores every processor").Required().String()
+	processorBrand = kingpin.Arg("psrbd", "Processor brand").Required().String()
+	processorSpeed = kingpin.Arg("psrspd", "Processor speed").Required().String()
+	totalMemory = kingpin.Arg("tm", "Total memory in MB").Required().String()
+	listenAddr = kingpin.Arg("unix-sock", "Exporter listen addr.").Required().String()
 )
 
 func readFile(file string) (string, error) {
@@ -67,7 +73,7 @@ func dellHardwareStorageVDisk() string {
 
 func dellHardwareNic() string {
 	tmp := "/dev/shm/dellhwnic.tmp"
-	cmdStr := fmt.Sprintf("awk -v hardware_nic_number=`omreport chassis nics | grep -v Network | grep -v Physical | grep -v Team | grep -v xenbr | grep bond |grep -v ovs-system | grep -c Interface` -v hardware_nic=`omreport chassis nics | awk '/^Connection Status/{print $NF}'| wc -l` 'BEGIN{if(hardware_nic_number==hardware_nic) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
+	cmdStr := fmt.Sprintf("awk -v hardware_nic_number=`omreport chassis nics | grep -v Network | grep -v Physical | grep -v Team | grep -v xenbr | grep -v bond |grep -v ovs-system | grep -c Interface` -v hardware_nic=`omreport chassis nics | awk '/^Connection Status/{print $NF}'| wc -l` 'BEGIN{if(hardware_nic_number==hardware_nic) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
 	cmd := exec.Command("/bin/sh", "-c", cmdStr)
 	cmd.Start()
 	cmd.Run()
@@ -136,7 +142,6 @@ func checkHealth() {
 	} else {
 		cache.GetInstance().Add("nic", 10 * time.Minute, 0)
 	}
-
 }
 
 func metrics(w http.ResponseWriter, req *http.Request) {
@@ -145,71 +150,100 @@ func metrics(w http.ResponseWriter, req *http.Request) {
 
 	r, fans := cache.GetInstance().Value("fans")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"fans\"} %g\n", namespace, float64(fans.(int)))
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"fans\"} %g\n",
+			namespace, *serverIp, float64(fans.(int)))
 	} else {
-		ret += fmt.Sprintf("%s{type=\"fans\"} %g\n", namespace, 1)
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"fans\"} %g\n",
+			namespace, *serverIp, float64(1))
 	}
 
 	r, memory := cache.GetInstance().Value("memory")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"memory\"} %g\n", namespace, float64(memory.(int)))
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"memory\"} %g\n",
+			namespace, *serverIp, float64(memory.(int)))
 	} else {
-		ret += fmt.Sprintf("%s{type=\"memory\"} %g\n", namespace, 1)
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"memory\"} %g\n",
+			namespace, *serverIp, float64(1))
 	}
 
 	r, powersupplies := cache.GetInstance().Value("powersupplies")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"power_supplies\"} %g\n", namespace, float64(powersupplies.(int)))
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"power_supplies\"} %g\n",
+			namespace, *serverIp, float64(powersupplies.(int)))
 	} else {
-		ret += fmt.Sprintf("%s{type=\"power_supplies\"} %g\n", namespace, 1)
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"power_supplies\"} %g\n",
+			namespace, *serverIp, float64(1))
 	}
 
 	r, powermanagement := cache.GetInstance().Value("powermanagement")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"power_management\"} %g\n", namespace, float64(powermanagement.(int)))
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"power_management\"} %g\n",
+			namespace, *serverIp, float64(powermanagement.(int)))
 	} else {
-		ret += fmt.Sprintf("%s{type=\"power_management\"} %g\n", namespace, 1)
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"power_management\"} %g\n",
+			namespace, *serverIp, float64(1))
 	}
 
 	r, processors := cache.GetInstance().Value("processors")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"processors\"} %g\n", namespace, float64(processors.(int)))
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"processors\"} %g\n",
+			namespace, *serverIp, float64(processors.(int)))
 	} else {
-		ret += fmt.Sprintf("%s{type=\"processors\"} %g\n", namespace, 1)
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"processors\"} %g\n",
+			namespace, *serverIp, float64(1))
 	}
 
 	r, temperatures := cache.GetInstance().Value("temperatures")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"temperatures\"} %g\n", namespace, float64(temperatures.(int)))
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"temperatures\"} %g\n",
+			namespace, *serverIp, float64(temperatures.(int)))
 	} else {
-		ret += fmt.Sprintf("%s{type=\"temperatures\"} %g\n", namespace, 1)
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"temperatures\"} %g\n",
+			namespace, *serverIp, float64(1))
 	}
 
 
 	r, physics_disk := cache.GetInstance().Value("physics_disk")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"physics_disk\"} %g\n", namespace, float64(physics_disk.(int)))
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"physics_disk\"} %g\n",
+			namespace, *serverIp, float64(physics_disk.(int)))
 	} else {
-		ret += fmt.Sprintf("%s{type=\"physics_disk\"} %g\n", namespace, 1)
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"physics_disk\"} %g\n",
+			namespace, *serverIp, float64(1))
 	}
 
 
 
 	r, virtual_disk := cache.GetInstance().Value("virtual_disk")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"virtual_disk\"} %g\n", namespace, float64(virtual_disk.(int)))
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"virtual_disk\"} %g\n",
+			namespace, *serverIp, float64(virtual_disk.(int)))
 	} else {
-		ret += fmt.Sprintf("%s{type=\"virtual_disk\"} %g\n", namespace, 1)
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"virtual_disk\"} %g\n",
+			namespace, *serverIp, float64(1))
 	}
 
 
 
 	r, nic := cache.GetInstance().Value("nic")
 	if r {
-		ret += fmt.Sprintf("%s{type=\"nic\"} %g\n", namespace, float64(nic.(int)))
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"nic\"} %g\n",
+			namespace, *serverIp, float64(nic.(int)))
 	} else {
-		ret += fmt.Sprintf("%s{type=\"nic\"} %g\n", namespace, 1)
+		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"nic\"} %g\n",
+			namespace, *serverIp, float64(1))
 	}
+
+	psrcnt, _ := strconv.ParseFloat(*processorCount, 64)
+	ret += fmt.Sprintf("%s_processors{sip=\"%s\"} %g\n", namespace, *serverIp, psrcnt)
+	psrcores, _ := strconv.ParseFloat(*processorCores, 64)
+	ret += fmt.Sprintf("%s_processor_cores{sip=\"%s\"} %g\n", namespace, *serverIp, psrcores)
+	ret += fmt.Sprintf("%s_processor_brand{sip=\"%s\",brand=\"%s\"} %g\n",
+		namespace, *serverIp, *processorBrand, float64(1))
+	psrspd, _ := strconv.ParseFloat(*processorSpeed, 64)
+	ret += fmt.Sprintf("%s_processor_speed{sip=\"%s\"} %g\n", namespace, *serverIp, psrspd)
+	tm, _ := strconv.ParseFloat(*totalMemory, 64)
+	ret += fmt.Sprintf("%s_total_memory{sip=\"%s\"} %g\n", namespace, *serverIp, tm)
 
 	io.WriteString(w, ret)
 }
