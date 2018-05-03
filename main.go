@@ -7,7 +7,6 @@ import (
 	"github.com/robfig/cron"
 	"os"
 	"net"
-	"io/ioutil"
 	"fmt"
 	"os/exec"
 	"github.com/ximply/dell-hardware-exporter/cache"
@@ -26,61 +25,34 @@ var (
 	listenAddr = kingpin.Arg("unix-sock", "Exporter listen addr.").Required().String()
 )
 
-func readFile(file string) (string, error) {
-	b, err := ioutil.ReadFile(file)
+func execCmd(cmdStr string) string {
+	cmd := exec.Command("/bin/sh", "-c", cmdStr)
+	cmd.Wait()
+	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return ""
 	}
-
-	return string(b), nil
+	return string(out)
 }
 
 func dellHardwareSummary() string {
-	tmp := "/dev/shm/dellhwsumm.tmp"
-	cmdStr := fmt.Sprintf("`omreport chassis | grep -v Health | grep -v Chassis | grep -v SEVERITY | grep -v For | grep -v Hardware | grep -v Voltages | grep -v Batteries | grep -v Intrusion | sed /^$/d > %s`", tmp)
-	cmd := exec.Command("/bin/sh", "-c", cmdStr)
-	cmd.Start()
-	cmd.Run()
-	cmd.Wait()
-
-	str, _ := readFile(tmp)
-	return str
+	cmdStr := fmt.Sprintf("`omreport chassis | grep -v Health | grep -v Chassis | grep -v SEVERITY | grep -v For | grep -v Hardware | grep -v Voltages | grep -v Batteries | grep -v Intrusion | sed /^$/d`")
+	return execCmd(cmdStr)
 }
 
 func dellHardwareStoragePDisk() string {
-	tmp := "/dev/shm/dellhwspd.tmp"
-	cmdStr := fmt.Sprintf("awk -v hardware_physics_disk_number=`omreport storage pdisk controller=0 | grep -c ^ID` -v hardware_physics_disk=`omreport storage pdisk controller=0 | awk '/^Status/{if(length($NF)==2) count+=1}END{print count}'` 'BEGIN{if(hardware_physics_disk_number==hardware_physics_disk) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
-	cmd := exec.Command("/bin/sh", "-c", cmdStr)
-	cmd.Start()
-	cmd.Run()
-	cmd.Wait()
-
-	str, _ := readFile(tmp)
-	return str
+	cmdStr := fmt.Sprintf("awk -v hardware_physics_disk_number=`omreport storage pdisk controller=0 | grep -c ^ID` -v hardware_physics_disk=`omreport storage pdisk controller=0 | awk '/^Status/{if(length($NF)==2) count+=1}END{print count}'` 'BEGIN{if(hardware_physics_disk_number==hardware_physics_disk) {print 1} else {print 0}}' | sed /^$/d")
+	return execCmd(cmdStr)
 }
 
 func dellHardwareStorageVDisk() string {
-	tmp := "/dev/shm/dellhwsvd.tmp"
-	cmdStr := fmt.Sprintf("awk -v hardware_virtual_disk_number=`omreport storage vdisk controller=0 | grep -c ^ID` -v hardware_virtual_disk=`omreport storage vdisk controller=0 | awk '/^Status/{if(length($NF)==2) count+=1}END{print count}'` 'BEGIN{if(hardware_virtual_disk_number==hardware_virtual_disk) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
-	cmd := exec.Command("/bin/sh", "-c", cmdStr)
-	cmd.Start()
-	cmd.Run()
-	cmd.Wait()
-
-	str, _ := readFile(tmp)
-	return str
+	cmdStr := fmt.Sprintf("awk -v hardware_virtual_disk_number=`omreport storage vdisk controller=0 | grep -c ^ID` -v hardware_virtual_disk=`omreport storage vdisk controller=0 | awk '/^Status/{if(length($NF)==2) count+=1}END{print count}'` 'BEGIN{if(hardware_virtual_disk_number==hardware_virtual_disk) {print 1} else {print 0}}' | sed /^$/d")
+	return execCmd(cmdStr)
 }
 
 func dellHardwareNic() string {
-	tmp := "/dev/shm/dellhwnic.tmp"
-	cmdStr := fmt.Sprintf("awk -v hardware_nic_number=`omreport chassis nics | grep -v Network | grep -v Physical | grep -v Team | grep -v xenbr | grep -v bond |grep -v ovs-system | grep -c Interface` -v hardware_nic=`omreport chassis nics | awk '/^Connection Status/{print $NF}'| wc -l` 'BEGIN{if(hardware_nic_number==hardware_nic) {print 1} else {print 0}}' | sed /^$/d > %s", tmp)
-	cmd := exec.Command("/bin/sh", "-c", cmdStr)
-	cmd.Start()
-	cmd.Run()
-	cmd.Wait()
-
-	str, _ := readFile(tmp)
-	return str
+	cmdStr := fmt.Sprintf("awk -v hardware_nic_number=`omreport chassis nics | grep -v Network | grep -v Physical | grep -v Team | grep -v xenbr | grep -v bond |grep -v ovs-system | grep -c Interface` -v hardware_nic=`omreport chassis nics | awk '/^Connection Status/{print $NF}'| wc -l` 'BEGIN{if(hardware_nic_number==hardware_nic) {print 1} else {print 0}}' | sed /^$/d")
+	return execCmd(cmdStr)
 }
 
 func checkHealth() {
