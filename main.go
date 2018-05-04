@@ -9,10 +9,9 @@ import (
 	"net"
 	"fmt"
 	"os/exec"
-	"github.com/ximply/dell-hardware-exporter/cache"
 	"strings"
-	"time"
 	"strconv"
+	"sync"
 )
 
 var (
@@ -24,6 +23,9 @@ var (
 	totalMemory = kingpin.Arg("tm", "Total memory in MB").Required().String()
 	listenAddr = kingpin.Arg("unix-sock", "Exporter listen addr.").Required().String()
 )
+
+var lock sync.RWMutex
+var cacheMap map[string]int
 
 func execCmd(cmdStr string) string {
 	cmd := exec.Command("/bin/sh", "-c", cmdStr)
@@ -87,124 +89,122 @@ func checkHealth() {
 				s2 = "temperatures"
 			}
 			if strings.Contains(s1, "Critical") {
-				cache.GetInstance().Add(s2, 10 * time.Minute, 0)
+				lock.Lock()
+				cacheMap[s2] = 0
+				lock.Unlock()
 			} else {
-				cache.GetInstance().Add(s2, 10 * time.Minute, 1)
+				lock.Lock()
+				cacheMap[s2] = 1
+				lock.Unlock()
 			}
 		}
 	}
 
 	spd := dellHardwareStoragePDisk()
+	physics_disk_v := 0
 	if strings.HasPrefix(spd, "1") {
-		cache.GetInstance().Add("physics_disk", 10 * time.Minute, 1)
-	} else {
-		cache.GetInstance().Add("physics_disk", 10 * time.Minute, 0)
+		physics_disk_v = 1
 	}
 
 	svd := dellHardwareStorageVDisk()
+	virtual_disk_v := 0
 	if strings.HasPrefix(svd, "1") {
-		cache.GetInstance().Add("virtual_disk", 10 * time.Minute, 1)
-	} else {
-		cache.GetInstance().Add("virtual_disk", 10 * time.Minute, 0)
+		virtual_disk_v = 1
 	}
 
 	nic := dellHardwareNic()
+	nic_v := 0
 	if strings.HasPrefix(nic, "1") {
-		cache.GetInstance().Add("nic", 10 * time.Minute, 1)
-	} else {
-		cache.GetInstance().Add("nic", 10 * time.Minute, 0)
+		nic_v = 1
 	}
+
+	lock.Lock()
+	cacheMap["physics_disk"] = physics_disk_v
+	cacheMap["virtual_disk"] = virtual_disk_v
+	cacheMap["nic"] = nic_v
+	lock.Unlock()
 }
 
 func metrics(w http.ResponseWriter, req *http.Request) {
 	ret := ""
 	namespace := "dell_hw"
 
-	r, fans := cache.GetInstance().Value("fans")
-	if r {
+	lock.RLock()
+	if v, ok := cacheMap["fans"]; ok {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"fans\"} %g\n",
-			namespace, *serverIp, float64(fans.(int)))
+			namespace, *serverIp, float64(v))
 	} else {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"fans\"} %g\n",
 			namespace, *serverIp, float64(1))
 	}
 
-	r, memory := cache.GetInstance().Value("memory")
-	if r {
+	if v, ok := cacheMap["memory"]; ok {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"memory\"} %g\n",
-			namespace, *serverIp, float64(memory.(int)))
+			namespace, *serverIp, float64(v))
 	} else {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"memory\"} %g\n",
 			namespace, *serverIp, float64(1))
 	}
 
-	r, powersupplies := cache.GetInstance().Value("powersupplies")
-	if r {
+	if v, ok := cacheMap["powersupplies"]; ok {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"power_supplies\"} %g\n",
-			namespace, *serverIp, float64(powersupplies.(int)))
+			namespace, *serverIp, float64(v))
 	} else {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"power_supplies\"} %g\n",
 			namespace, *serverIp, float64(1))
 	}
 
-	r, powermanagement := cache.GetInstance().Value("powermanagement")
-	if r {
+	if v, ok := cacheMap["powermanagement"]; ok {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"power_management\"} %g\n",
-			namespace, *serverIp, float64(powermanagement.(int)))
+			namespace, *serverIp, float64(v))
 	} else {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"power_management\"} %g\n",
 			namespace, *serverIp, float64(1))
 	}
 
-	r, processors := cache.GetInstance().Value("processors")
-	if r {
+	if v, ok := cacheMap["processors"]; ok {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"processors\"} %g\n",
-			namespace, *serverIp, float64(processors.(int)))
+			namespace, *serverIp, float64(v))
 	} else {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"processors\"} %g\n",
 			namespace, *serverIp, float64(1))
 	}
 
-	r, temperatures := cache.GetInstance().Value("temperatures")
-	if r {
+	if v, ok := cacheMap["temperatures"]; ok {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"temperatures\"} %g\n",
-			namespace, *serverIp, float64(temperatures.(int)))
+			namespace, *serverIp, float64(v))
 	} else {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"temperatures\"} %g\n",
 			namespace, *serverIp, float64(1))
 	}
 
 
-	r, physics_disk := cache.GetInstance().Value("physics_disk")
-	if r {
+	if v, ok := cacheMap["physics_disk"]; ok {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"physics_disk\"} %g\n",
-			namespace, *serverIp, float64(physics_disk.(int)))
+			namespace, *serverIp, float64(v))
 	} else {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"physics_disk\"} %g\n",
 			namespace, *serverIp, float64(1))
 	}
 
 
-
-	r, virtual_disk := cache.GetInstance().Value("virtual_disk")
-	if r {
+	if v, ok := cacheMap["virtual_disk"]; ok {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"virtual_disk\"} %g\n",
-			namespace, *serverIp, float64(virtual_disk.(int)))
+			namespace, *serverIp, float64(v))
 	} else {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"virtual_disk\"} %g\n",
 			namespace, *serverIp, float64(1))
 	}
 
 
-
-	r, nic := cache.GetInstance().Value("nic")
-	if r {
+	if v, ok := cacheMap["nic"]; ok {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"nic\"} %g\n",
-			namespace, *serverIp, float64(nic.(int)))
+			namespace, *serverIp, float64(v))
 	} else {
 		ret += fmt.Sprintf("%s_health{sip=\"%s\",type=\"nic\"} %g\n",
 			namespace, *serverIp, float64(1))
 	}
+	lock.RUnlock()
 
 	psrcnt, _ := strconv.ParseFloat(*processorCount, 64)
 	ret += fmt.Sprintf("%s_processors{sip=\"%s\"} %g\n", namespace, *serverIp, psrcnt)
@@ -232,6 +232,8 @@ func main() {
 	} else {
 		addr = "/dev/shm/dellhardware_exporter.sock"
 	}
+
+	cacheMap = make(map[string]int)
 
 	checkHealth()
 
