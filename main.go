@@ -38,7 +38,7 @@ func execCmd(cmdStr string) string {
 }
 
 func dellHardwareSummary() string {
-	cmdStr := fmt.Sprintf("`omreport chassis | grep -v Health | grep -v Chassis | grep -v SEVERITY | grep -v For | grep -v Hardware | grep -v Voltages | grep -v Batteries | grep -v Intrusion | sed /^$/d`")
+	cmdStr := fmt.Sprintf("omreport chassis | grep -v Health | grep -v Chassis | grep -v SEVERITY | grep -v For | grep -v Hardware | grep -v Voltages | grep -v Batteries | grep -v Intrusion | sed /^$/d")
 	return execCmd(cmdStr)
 }
 
