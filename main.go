@@ -21,6 +21,8 @@ var (
 	processorBrand = kingpin.Arg("psrbd", "Processor brand").Required().String()
 	processorSpeed = kingpin.Arg("psrspd", "Processor speed").Required().String()
 	totalMemory = kingpin.Arg("tm", "Total memory in MB").Required().String()
+	disks = kingpin.Arg("disks", "physics disks").Required().String()
+	megacli = kingpin.Arg("megacli", "cmd path").Required().String()
 	listenAddr = kingpin.Arg("unix-sock", "Exporter listen addr.").Required().String()
 )
 
@@ -43,13 +45,42 @@ func dellHardwareSummary() string {
 }
 
 func dellHardwareStoragePDisk() string {
-	cmdStr := fmt.Sprintf("awk -v hardware_physics_disk_number=`omreport storage pdisk controller=0 | grep -c ^ID` -v hardware_physics_disk=`omreport storage pdisk controller=0 | awk '/^Status/{if(length($NF)==2) count+=1}END{print count}'` 'BEGIN{if(hardware_physics_disk_number==hardware_physics_disk) {print 1} else {print 0}}' | sed /^$/d")
-	return execCmd(cmdStr)
+	if useOmreport {
+		cmdStr := fmt.Sprintf("awk -v hardware_physics_disk_number=`omreport storage pdisk controller=0 | grep -c ^ID` -v hardware_physics_disk=`omreport storage pdisk controller=0 | awk '/^Status/{if(length($NF)==2) count+=1}END{print count}'` 'BEGIN{if(hardware_physics_disk_number==hardware_physics_disk) {print 1} else {print 0}}' | sed /^$/d")
+		return execCmd(cmdStr)
+	}
+
+	if len(disksMap) == 0 {
+		return "0"
+	}
+
+	for k, v := range disksMap {
+		for i := 0; i < v; i++ {
+			r := execCmd(fmt.Sprintf("smartctl -H -d megaraid,%d %s | grep Status | grep OK | wc -l", i, k))
+			if strings.HasPrefix(r, "0") {
+				return "0"
+			}
+		}
+	}
+
+	return "1"
 }
 
 func dellHardwareStorageVDisk() string {
-	cmdStr := fmt.Sprintf("awk -v hardware_virtual_disk_number=`omreport storage vdisk controller=0 | grep -c ^ID` -v hardware_virtual_disk=`omreport storage vdisk controller=0 | awk '/^Status/{if(length($NF)==2) count+=1}END{print count}'` 'BEGIN{if(hardware_virtual_disk_number==hardware_virtual_disk) {print 1} else {print 0}}' | sed /^$/d")
-	return execCmd(cmdStr)
+	if useOmreport {
+		cmdStr := fmt.Sprintf("awk -v hardware_virtual_disk_number=`omreport storage vdisk controller=0 | grep -c ^ID` -v hardware_virtual_disk=`omreport storage vdisk controller=0 | awk '/^Status/{if(length($NF)==2) count+=1}END{print count}'` 'BEGIN{if(hardware_virtual_disk_number==hardware_virtual_disk) {print 1} else {print 0}}' | sed /^$/d")
+		return execCmd(cmdStr)
+	}
+
+	r := execCmd(fmt.Sprintf("%s -PDList -aALL | grep Error", *megacli))
+	r = strings.TrimRight(r, "\n")
+	l := strings.Split(r, "\n")
+	for _, i := range l {
+		if !strings.Contains(i, "Count: 0") {
+			return "0"
+		}
+	}
+	return "1"
 }
 
 func dellHardwareNic() string {
@@ -221,6 +252,8 @@ func metrics(w http.ResponseWriter, req *http.Request) {
 }
 
 var url string
+var disksMap map[string]int
+var useOmreport bool
 
 func main() {
 	kingpin.Version("0.0.1")
@@ -233,7 +266,31 @@ func main() {
 		addr = "/dev/shm/dellhardware_exporter.sock"
 	}
 
+	if strings.Contains(execCmd("whereis omreport"), "/") {
+		useOmreport = true
+	} else {
+		useOmreport = false
+	}
+
+	if len(*megacli) == 0 {
+		panic("error megacli path")
+	}
+
 	cacheMap = make(map[string]int)
+	disksMap = make(map[string]int)
+	// /dev/sda,4;/dev/sdb,4
+	if len(*disks) > 0 {
+		l := strings.Split(*disks, ";")
+		for _, i := range l {
+			d := strings.Split(i, ",")
+			if len(d) == 2 {
+				cnt, err := strconv.Atoi(d[1])
+				if err == nil {
+					disksMap[d[0]] = cnt
+				}
+			}
+		}
+	}
 
 	checkHealth()
 
