@@ -8,6 +8,7 @@ all:
         go build \
         -a -ldflags -extldflags=-static \
         -ldflags  "-X 'main.buildTime=`date "+%Y-%m-%d %H:%M:%S"`' -X 'main.goVersion=`go version`' -X main.buildName=${BUILD_NAME} -X main.commitID=${COMMIT_SHA1}" \
+        -o ${BUILD_NAME}
 
 clean:
         rm ${BUILD_NAME} -f
